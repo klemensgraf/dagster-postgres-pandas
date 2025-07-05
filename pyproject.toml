@@ -1,0 +1,99 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dagster-postgres-pandas"
+version = "0.1.0"
+description = "PostgreSQL I/O manager for Dagster with Pandas DataFrame support"
+readme = "README.md"
+license = "MIT"
+authors = [{ name = "Klemens Graf", email = "klemensgraf15@gmail.com" }]
+maintainers = [{ name = "Klemens Graf", email = "klemensgraf15@gmail.com" }]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Database",
+    "Topic :: Scientific/Engineering",
+]
+keywords = ["dagster", "postgresql", "pandas", "io-manager", "data-engineering"]
+requires-python = ">=3.10"
+dependencies = [
+    "dagster>=1.8.0",
+    "pandas>=2.1.0",
+    "sqlalchemy>=2.0.25",
+    "psycopg2-binary>=2.9.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0",
+    "black>=22.0.0",
+    "isort>=5.10.0",
+    "flake8>=5.0.0",
+    "mypy>=1.0.0",
+    "pre-commit>=2.20.0",
+    "tox>=4.0.0",
+]
+docs = [
+    "mkdocs>=1.4.0",
+    "mkdocs-material>=8.5.0",
+    "mkdocs-mermaid2-plugin>=0.6.0",
+]
+test = [
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0",
+    "pytest-postgresql>=4.1.0",
+    "testcontainers[postgres]>=3.7.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/klemensgraf/dagster-postgres-pandas"
+Documentation = "https://github.com/klemensgraf/dagster-postgres-pandas/blob/main/README.md"
+Repository = "https://github.com/klemensgraf/dagster-postgres-pandas.git"
+"Bug Tracker" = "https://github.com/klemensgraf/dagster-postgres-pandas/issues"
+Changelog = "https://github.com/klemensgraf/dagster-postgres-pandas/blob/main/CHANGELOG.md"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["dagster_postgres_pandas*"]
+
+[tool.setuptools.package-data]
+dagster_postgres_pandas = ["py.typed"]
+
+[tool.black]
+line-length = 88
+target-version = ['py310']
+include = '\.pyi?$'
+
+[tool.isort]
+profile = "black"
+multi_line_output = 3
+
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+
+[tool.pytest.ini_options]
+minversion = "7.0"
+addopts = "-ra -q --cov=dagster_postgres_pandas --cov-report=term-missing"
+testpaths = ["tests"]
+
+[tool.coverage.run]
+source = ["dagster_postgres_pandas"]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise AssertionError",
+    "raise NotImplementedError",
+]
