@@ -294,6 +294,8 @@ class PostgresPandasIOManager(ConfigurableIOManager):
                 f"{len(df.columns)} columns from {schema}.{table_name}"
             )
 
+            return df
+
         except SchemaNotFoundError:
             raise
         except Exception as e:

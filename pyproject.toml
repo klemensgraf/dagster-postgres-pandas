@@ -35,8 +35,6 @@ dev = [
     "pytest>=7.0.0",
     "pytest-cov>=4.0.0",
     "ruff>=0.1.6",
-    "pre-commit>=2.20.0",
-    "tox>=4.0.0",
 ]
 docs = [
     "mkdocs>=1.4.0",
@@ -46,8 +44,6 @@ docs = [
 test = [
     "pytest>=7.0.0",
     "pytest-cov>=4.0.0",
-    "pytest-postgresql>=4.1.0",
-    "testcontainers[postgres]>=3.7.0",
 ]
 
 [project.urls]
