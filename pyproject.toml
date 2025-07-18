@@ -4,14 +4,14 @@ build-backend = "hatchling.build"
 
 [project]
 name = "dagster-postgres-pandas"
-version = "0.1.0"
+version = "0.2.0"
 description = "PostgreSQL I/O manager for Dagster with Pandas DataFrame support"
 readme = "README.md"
 license = "MIT"
 authors = [{ name = "Klemens Graf", email = "klemensgraf15@gmail.com" }]
 maintainers = [{ name = "Klemens Graf", email = "klemensgraf15@gmail.com" }]
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.10",
