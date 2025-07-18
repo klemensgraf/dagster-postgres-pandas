@@ -1,5 +1,7 @@
+import os
 from unittest.mock import MagicMock, patch
 
+import dagster as dg
 import pandas as pd
 import pytest
 from dagster import InputContext, OutputContext
@@ -610,3 +612,79 @@ class TestPostgresPandasIOManager:
                         )
                         assert "SQL read error" in str(excinfo.value)
                         mock_engine.dispose.assert_called_once()
+
+
+class TestPostgresPandasIOManagerEnvVar:
+    """Test EnvVar support for connection strings."""
+
+    def test_envvar_connection_string_creation(self):
+        """Test that IO manager can be created with EnvVar connection string."""
+        os.environ["TEST_POSTGRES_CONNECTION_STRING"] = (
+            "postgresql://user:pass@localhost:5432/test"
+        )
+
+        # This should not raise an exception
+        io_manager = PostgresPandasIOManager(
+            connection_string=dg.EnvVar("TEST_POSTGRES_CONNECTION_STRING"),
+            default_schema="test_schema",
+        )
+
+        assert io_manager is not None
+        # Clean up
+        del os.environ["TEST_POSTGRES_CONNECTION_STRING"]
+
+    def test_envvar_invalid_connection_string_runtime_validation(self):
+        """Test that invalid connection strings in EnvVar are caught."""
+        os.environ["TEST_INVALID_CONNECTION_STRING"] = "invalid://not-postgres"
+
+        # The validation might happen at config time if EnvVar can be resolved
+        with pytest.raises(
+            InvalidConfigurationError,
+            match="Invalid PostgreSQL connection string format",
+        ):
+            PostgresPandasIOManager(
+                connection_string=dg.EnvVar("TEST_INVALID_CONNECTION_STRING"),
+                default_schema="test_schema",
+            )
+
+        # Clean up
+        del os.environ["TEST_INVALID_CONNECTION_STRING"]
+
+    def test_direct_string_still_validates_at_config_time(self):
+        """Test that direct string connection strings are still validated immediately."""
+        with pytest.raises(
+            InvalidConfigurationError,
+            match="Invalid PostgreSQL connection string format",
+        ):
+            PostgresPandasIOManager(
+                connection_string="invalid://not-postgres", default_schema="test_schema"
+            )
+
+    @patch("dagster_postgres_pandas.io_manager.sa.create_engine")
+    def test_envvar_connection_string_resolution_in_engine(self, mock_create_engine):
+        """Test that EnvVar is properly resolved when creating engine."""
+        os.environ["TEST_POSTGRES_CONNECTION_STRING"] = (
+            "postgresql://user:pass@localhost:5432/test"
+        )
+
+        # Mock the engine creation to avoid actual connection
+        mock_engine = MagicMock()
+        mock_engine.connect.return_value.__enter__.return_value = MagicMock()
+        mock_create_engine.return_value = mock_engine
+
+        io_manager = PostgresPandasIOManager(
+            connection_string=dg.EnvVar("TEST_POSTGRES_CONNECTION_STRING"),
+            default_schema="test_schema",
+        )
+
+        # Call _get_engine to test resolution
+        result_engine = io_manager._get_engine()
+
+        # Verify that create_engine was called with the resolved string, not the EnvVar
+        mock_create_engine.assert_called_once()
+        args, kwargs = mock_create_engine.call_args
+        assert args[0] == "postgresql://user:pass@localhost:5432/test"
+        assert result_engine is mock_engine
+
+        # Clean up
+        del os.environ["TEST_POSTGRES_CONNECTION_STRING"]

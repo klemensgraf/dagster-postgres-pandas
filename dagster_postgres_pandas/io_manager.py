@@ -62,15 +62,34 @@ class PostgresPandasIOManager(ConfigurableIOManager):
 
     def _validate_config(self):
         """Validate configuration after initialization."""
-        if not self.connection_string:
+        # Handle EnvVar objects - get the actual string value
+        connection_string_value = self.connection_string
+        if hasattr(self.connection_string, "get_value"):
+            # This is a Dagster EnvVar object
+            try:
+                connection_string_value = self.connection_string.get_value()
+            except Exception:
+                # Can't validate EnvVar at config time, will validate at runtime
+                logger.info(
+                    "Skipping connection string validation for EnvVar - will validate at runtime"
+                )
+                return
+
+        if not connection_string_value:
             raise InvalidConfigurationError("Connection string cannot be empty")
 
         # Validate connection string format
-        if not self.connection_string.startswith(
+        if not connection_string_value.startswith(
             ("postgresql://", "postgresql+psycopg2://")
         ):
             raise InvalidConfigurationError(
                 "Invalid PostgreSQL connection string format"
+            )
+
+        # Validate default schema
+        if not self._is_valid_identifier(self.default_schema):
+            raise InvalidConfigurationError(
+                f"Invalid default schema: {self.default_schema}"
             )
 
         # Validate default schema
@@ -89,9 +108,25 @@ class PostgresPandasIOManager(ConfigurableIOManager):
         Raises:
             ConnectionError: If connection cannot be established
         """
+        # Resolve connection string (handle EnvVar objects)
+        connection_string_value = self.connection_string
+        if hasattr(self.connection_string, "get_value"):
+            connection_string_value = self.connection_string.get_value()
+
+        # Validate connection string format at runtime
+        if not connection_string_value:
+            raise InvalidConfigurationError("Connection string cannot be empty")
+
+        if not connection_string_value.startswith(
+            ("postgresql://", "postgresql+psycopg2://")
+        ):
+            raise InvalidConfigurationError(
+                "Invalid PostgreSQL connection string format"
+            )
+
         try:
             engine = sa.create_engine(
-                self.connection_string,
+                connection_string_value,
                 connect_args={
                     "connect_timeout": self.timeout,
                     "sslmode": "require" if self.require_ssl else "prefer",

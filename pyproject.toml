@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "dagster-postgres-pandas"
-version = "0.2.0"
+version = "0.2.1"
 description = "PostgreSQL I/O manager for Dagster with Pandas DataFrame support"
 readme = "README.md"
 license = "MIT"
