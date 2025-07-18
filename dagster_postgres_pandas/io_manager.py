@@ -13,6 +13,7 @@ import sqlalchemy as sa
 from dagster import ConfigurableIOManager, InputContext, OutputContext
 
 from dagster_postgres_pandas.exceptions import (
+    InvalidConfigurationError,
     PostgresIOManagerError,
     SchemaNotFoundError,
 )
@@ -51,6 +52,45 @@ class PostgresPandasIOManager(ConfigurableIOManager):
     index: bool = False
     chunk_size: Optional[int] = None
     timeout: int = 30
+    require_ssl: bool = False
+    max_identifier_length: int = 63  # PostgreSQL limit
+
+    def __init__(self, **kwargs):
+        """Initialize the IO manager and validate configuration."""
+        super().__init__(**kwargs)
+        self._validate_config()
+
+    def _validate_config(self):
+        """Validate configuration after initialization."""
+        # Handle EnvVar objects - get the actual string value
+        connection_string_value = self.connection_string
+        if hasattr(self.connection_string, "get_value"):
+            # This is a Dagster EnvVar object
+            try:
+                connection_string_value = self.connection_string.get_value()
+            except Exception:
+                # Can't validate EnvVar at config time, will validate at runtime
+                logger.info(
+                    "Skipping connection string validation for EnvVar - will validate at runtime"
+                )
+                return
+
+        if not connection_string_value:
+            raise InvalidConfigurationError("Connection string cannot be empty")
+
+        # Validate connection string format
+        if not connection_string_value.startswith(
+            ("postgresql://", "postgresql+psycopg2://")
+        ):
+            raise InvalidConfigurationError(
+                "Invalid PostgreSQL connection string format"
+            )
+
+        # Validate default schema
+        if not self._is_valid_identifier(self.default_schema):
+            raise InvalidConfigurationError(
+                f"Invalid default schema: {self.default_schema}"
+            )
 
     def _get_engine(self) -> sa.Engine:
         """
@@ -62,12 +102,34 @@ class PostgresPandasIOManager(ConfigurableIOManager):
         Raises:
             ConnectionError: If connection cannot be established
         """
+        # Resolve connection string (handle EnvVar objects)
+        connection_string_value = self.connection_string
+        if hasattr(self.connection_string, "get_value"):
+            connection_string_value = self.connection_string.get_value()
+
+        # Validate connection string format at runtime
+        if not connection_string_value:
+            raise InvalidConfigurationError("Connection string cannot be empty")
+
+        if not connection_string_value.startswith(
+            ("postgresql://", "postgresql+psycopg2://")
+        ):
+            raise InvalidConfigurationError(
+                "Invalid PostgreSQL connection string format"
+            )
+
         try:
             engine = sa.create_engine(
-                self.connection_string,
-                connect_args={"connect_timeout": self.timeout},
+                connection_string_value,
+                connect_args={
+                    "connect_timeout": self.timeout,
+                    "sslmode": "require" if self.require_ssl else "prefer",
+                },
                 pool_pre_ping=True,  # Verify connections before use
-                pool_recycle=500,  # Recycle connections after 5 minutes
+                pool_recycle=300,  # Recycle connections after 5 minutes
+                pool_size=5,
+                max_overflow=10,
+                echo=False,  # Never log SQL in production
             )
 
             # Test connection
@@ -80,28 +142,13 @@ class PostgresPandasIOManager(ConfigurableIOManager):
     def _get_schema_and_table_for_output(
         self, context: OutputContext
     ) -> tuple[str, str]:
-        """
-        Determine schema and table name for output (storing).
-
-        Schema determination priority:
-        1. Asset metadata: metadata={"schema": "schema_name"}
-        2. Resource config: schema from resource configuration
-        3. Default schema: fallback value from default_schema
-
-        Args:
-            context: Output context with asset information
-
-        Returns:
-            Tuple of (schema_name, table_name)
-        """
-
+        """Determine schema and table name for output with validation."""
         schema = None
 
-        # 1. Check asset metadata
+        # Get schema from metadata/config
         if hasattr(context, "definition_metadata") and context.definition_metadata:
             schema = context.definition_metadata.get("schema")
 
-        # 2. Check resource config
         if (
             not schema
             and hasattr(context, "resource_config")
@@ -109,33 +156,28 @@ class PostgresPandasIOManager(ConfigurableIOManager):
         ):
             schema = context.resource_config.get("schema")
 
-        # 3. Use default schema
         if not schema:
             schema = self.default_schema
 
-        # Generate table name from asset key
-        table_name = "_".join(context.asset_key.path)
+        # Validate schema
+        if not self._is_valid_identifier(schema):
+            raise PostgresIOManagerError(f"Invalid schema name: {schema}")
+
+        # Generate and sanitize table name
+        table_name = self._sanitize_table_name("_".join(context.asset_key.path))
+        if not table_name:
+            raise PostgresIOManagerError(
+                "Could not generate valid table name from asset key"
+            )
 
         logger.info(f"Output - Using schema: {schema}, table: {table_name}")
         return schema, table_name
 
-    def _get_schema_and_table_for_input(
-        self, context: OutputContext
-    ) -> tuple[str, str]:
-        """
-        Determine schema and table name for input (loading).
-
-        For inputs, the schema must be determined from the upstream asset!
-
-        Args:
-            context: Input context with asset information
-
-        Returns:
-            Tuple of (schema_name, table_name)
-        """
+    def _get_schema_and_table_for_input(self, context: InputContext) -> tuple[str, str]:
+        """Determine schema and table name for input with validation."""
         schema = None
 
-        # 1. Check upstream output metadata
+        # Get schema from upstream output metadata
         if hasattr(context, "upstream_output") and context.upstream_output:
             upstream_context = context.upstream_output
             if (
@@ -144,39 +186,81 @@ class PostgresPandasIOManager(ConfigurableIOManager):
             ):
                 schema = upstream_context.definition_metadata.get("schema")
 
-        # 2. Fallback to default schema
+        # Fallback to default schema
         if not schema:
             schema = self.default_schema
 
-        # Generate table name from asset key
-        table_name = "_".join(context.asset_key.path)
+        # Validate schema
+        if not self._is_valid_identifier(schema):
+            raise PostgresIOManagerError(f"Invalid schema name: {schema}")
+
+        # Generate and sanitize table name
+        table_name = self._sanitize_table_name("_".join(context.asset_key.path))
+        if not table_name:
+            raise PostgresIOManagerError(
+                "Could not generate valid table name from asset key"
+            )
 
         logger.info(f"Input - Using schema: {schema}, table: {table_name}")
         return schema, table_name
 
     def _ensure_schema_exists(self, engine: sa.Engine, schema: str) -> None:
-        """
-        Ensure that the schema exists, create if necessary.
-
-        Args:
-            engine: SQLAlchemy engine
-            schema: Schema name to create
-
-        Raises:
-            PostgresIOManagerError: If schema creation fails
-        """
-        if schema == "public":  # the public schema always exists
+        """Ensure that the schema exists, create if necessary."""
+        if schema == "public":
             return
+
+        # Validate schema name to prevent injection
+        if not self._is_valid_identifier(schema):
+            raise PostgresIOManagerError(f"Invalid schema name: {schema}")
 
         try:
             with engine.connect() as conn:
-                conn.execute(sa.text(f"CREATE SCHEMA IF NOT EXISTS {schema}"))
+                # Use quoted identifier for safe schema creation
+                conn.execute(sa.text(f'CREATE SCHEMA IF NOT EXISTS "{schema}"'))
                 conn.commit()
                 logger.info(f"Ensured schema exists: {schema}")
         except Exception as e:
             raise PostgresIOManagerError(
                 f"Failed to create schema {schema}: {str(e)}"
             ) from e
+
+    def _is_valid_identifier(self, name: str) -> bool:
+        """Validate SQL identifier to prevent injection."""
+        import re
+
+        if not name or len(name) > self.max_identifier_length:
+            return False
+        # Allow alphanumeric, underscore, must start with letter or underscore
+        return bool(re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*$", name))
+
+    def _sanitize_table_name(self, name: str) -> str:
+        """
+        Sanitize table name to be PostgreSQL compliant.
+
+        Rules:
+        1. Remove/ignore special characters rather than replacing with underscores
+        2. Ensure starts with letter or underscore
+        3. Only allow alphanumeric and underscores
+        4. Truncate to max length
+        """
+        import re
+
+        if not name:
+            return ""
+
+        # Remove special characters, keep only alphanumeric and underscores
+        sanitized = re.sub(r"[^a-zA-Z0-9_]", "", name)
+
+        # If starts with number, prefix with underscore
+        if sanitized and sanitized[0].isdigit():
+            sanitized = f"_{sanitized}"
+
+        # If completely empty after sanitization, return empty
+        if not sanitized:
+            return ""
+
+        # Truncate to PostgreSQL limit
+        return sanitized[: self.max_identifier_length]  # PostgreSQL identifier limit
 
     def _table_exists(self, engine: sa.Engine, schema: str, table_name: str) -> bool:
         """
