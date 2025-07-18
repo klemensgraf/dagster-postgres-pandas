@@ -92,12 +92,6 @@ class PostgresPandasIOManager(ConfigurableIOManager):
                 f"Invalid default schema: {self.default_schema}"
             )
 
-        # Validate default schema
-        if not self._is_valid_identifier(self.default_schema):
-            raise InvalidConfigurationError(
-                f"Invalid default schema: {self.default_schema}"
-            )
-
     def _get_engine(self) -> sa.Engine:
         """
         Create SQLAlchemy engine with configured connection string.
