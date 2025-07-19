@@ -168,9 +168,28 @@ class TestPostgresPandasIOManager:
 
         # Test empty DataFrame warning
         empty_df = pd.DataFrame()
-        with patch("dagster_postgres_pandas.io_manager.logger.warning") as mock_warning:
-            io_manager.handle_output(output_context, empty_df)
-            mock_warning.assert_called_once()
+        with (
+            patch("dagster_postgres_pandas.io_manager.logger.warning") as mock_warning,
+            patch(
+                "dagster_postgres_pandas.io_manager.PostgresPandasIOManager._get_engine"
+            ) as mock_get_engine,
+            patch(
+                "dagster_postgres_pandas.io_manager.PostgresPandasIOManager._get_schema_and_table_for_output"
+            ) as mock_get_schema,
+            patch(
+                "dagster_postgres_pandas.io_manager.PostgresPandasIOManager._ensure_schema_exists"
+            ) as mock_ensure_schema,
+        ):
+            mock_engine = MagicMock()
+            mock_get_engine.return_value = mock_engine
+            mock_get_schema.return_value = ("test_schema", "test_table")
+
+            with patch.object(empty_df, "to_sql") as mock_to_sql:
+                io_manager.handle_output(output_context, empty_df)
+                mock_warning.assert_called_once_with(
+                    "Storing empty DataFrame with column structure only."
+                )
+                mock_engine.dispose.assert_called_once()
 
         # Test successful output
         with (
