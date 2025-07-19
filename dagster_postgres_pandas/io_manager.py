@@ -309,8 +309,7 @@ class PostgresPandasIOManager(ConfigurableIOManager):
             raise ValueError(f"Expected Pandas DataFrame, got {type(obj)}")
 
         if obj.empty:
-            logger.warning("Attempting to store empty DataFrame")
-            return
+            logger.warning("Storing empty DataFrame with column structure only.")
 
         engine = self._get_engine()
         schema, table_name = self._get_schema_and_table_for_output(context)
